@@ -1,12 +1,12 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { z } from 'zod';
 import { retrieveRelevantDocs } from '@/lib/rag/retrieval';
-import { generateResponse } from '@/lib/claude';
+import { generateResponse } from '@/lib/llm';
 import { sql } from '@/lib/db';
 
 const InquirySchema = z.object({
   query: z.string().min(1).max(2000),
-  language: z.enum(['ja', 'en']).optional().default('ja'),
+  language: z.enum(['ja', 'en', 'zh']).optional().default('ja'),
 });
 
 export async function POST(request: NextRequest) {
@@ -34,6 +34,9 @@ export async function POST(request: NextRequest) {
       RETURNING id
     `;
 
+    if (!result.rows[0]) {
+      throw new Error('Failed to create inquiry record: INSERT returned no rows');
+    }
     const inquiryId = result.rows[0].id as string;
 
     return NextResponse.json({
@@ -64,16 +67,50 @@ export async function GET(request: NextRequest) {
   const limit = Math.min(parseInt(searchParams.get('limit') ?? '20'), 100);
   const offset = parseInt(searchParams.get('offset') ?? '0');
 
-  try {
-    const result = await sql`
-      SELECT id, query, generated_response, final_response, was_corrected,
-             retrieved_doc_ids, language, created_at
-      FROM inquiries
-      ORDER BY created_at DESC
-      LIMIT ${limit} OFFSET ${offset}
-    `;
+  // サーバーサイドフィルタ: search / corrected / language
+  const search = searchParams.get('search')?.trim() ?? '';
+  const corrected = searchParams.get('corrected') ?? 'all'; // 'all' | 'corrected' | 'original'
+  const language = searchParams.get('language') ?? 'all';
 
-    const countResult = await sql`SELECT COUNT(*) as total FROM inquiries`;
+  // ILIKE パターン: 空文字のとき '%' で全件マッチ、それ以外は部分一致
+  const searchPattern = search ? `%${search}%` : '%';
+
+  try {
+    const [result, countResult] = await Promise.all([
+      sql`
+        SELECT id, query, generated_response, final_response, was_corrected,
+               retrieved_doc_ids, language, created_at
+        FROM inquiries
+        WHERE (
+          query                              ILIKE ${searchPattern} OR
+          generated_response                 ILIKE ${searchPattern} OR
+          COALESCE(final_response, '')       ILIKE ${searchPattern}
+        )
+        AND (
+          ${corrected} = 'all'
+          OR (${corrected} = 'corrected'  AND was_corrected = TRUE)
+          OR (${corrected} = 'original'   AND was_corrected = FALSE)
+        )
+        AND (${language} = 'all' OR language = ${language})
+        ORDER BY created_at DESC
+        LIMIT ${limit} OFFSET ${offset}
+      `,
+      sql`
+        SELECT COUNT(*) AS total
+        FROM inquiries
+        WHERE (
+          query                              ILIKE ${searchPattern} OR
+          generated_response                 ILIKE ${searchPattern} OR
+          COALESCE(final_response, '')       ILIKE ${searchPattern}
+        )
+        AND (
+          ${corrected} = 'all'
+          OR (${corrected} = 'corrected'  AND was_corrected = TRUE)
+          OR (${corrected} = 'original'   AND was_corrected = FALSE)
+        )
+        AND (${language} = 'all' OR language = ${language})
+      `,
+    ]);
 
     return NextResponse.json({
       inquiries: result.rows,

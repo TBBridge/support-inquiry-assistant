@@ -31,11 +31,8 @@ export async function insertDocument(doc: DocumentInsert): Promise<string> {
 }
 
 export async function insertDocuments(docs: DocumentInsert[]): Promise<string[]> {
-  const ids: string[] = [];
-  for (const doc of docs) {
-    ids.push(await insertDocument(doc));
-  }
-  return ids;
+  // 直列ではなく並列 INSERT でスループットを改善
+  return Promise.all(docs.map((doc) => insertDocument(doc)));
 }
 
 export async function similaritySearch(

@@ -24,7 +24,12 @@ type Props = {
 
 export function InquiryForm({ onResult, onLoading, isLoading }: Props) {
   const [query, setQuery] = useState('');
-  const [language, setLanguage] = useState<'ja' | 'en'>('ja');
+  const [language, setLanguage] = useState<'ja' | 'en' | 'zh'>('zh');
+
+  const MAX_CHARS = 2000;
+  const charCount = query.length;
+  const isNearLimit = charCount >= MAX_CHARS * 0.9;
+  const isOverLimit = charCount > MAX_CHARS;
   const { toast } = useToast();
 
   async function handleSubmit(e: React.FormEvent) {
@@ -77,21 +82,36 @@ export function InquiryForm({ onResult, onLoading, isLoading }: Props) {
               placeholder="お客様からの問い合わせ内容をここに入力してください...&#10;&#10;例: 製品の返品ポリシーについて教えてください。"
               className="min-h-[300px] resize-none text-sm"
               disabled={isLoading}
+              maxLength={MAX_CHARS}
             />
-            <p className="text-xs text-gray-500 text-right">{query.length} / 2000</p>
+            <p
+              className={`text-xs text-right font-medium transition-colors ${
+                isOverLimit
+                  ? 'text-red-500'
+                  : isNearLimit
+                  ? 'text-amber-500'
+                  : 'text-gray-400'
+              }`}
+            >
+              {charCount} / {MAX_CHARS}
+              {isNearLimit && !isOverLimit && (
+                <span className="ml-1">（上限まで残り {MAX_CHARS - charCount} 文字）</span>
+              )}
+            </p>
           </div>
 
           <div className="space-y-2">
             <Label htmlFor="language">回答言語</Label>
             <Select
               value={language}
-              onValueChange={(v) => setLanguage(v as 'ja' | 'en')}
+              onValueChange={(v) => setLanguage(v as 'ja' | 'en' | 'zh')}
               disabled={isLoading}
             >
               <SelectTrigger id="language" className="w-40">
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
+                <SelectItem value="zh">中文</SelectItem>
                 <SelectItem value="ja">日本語</SelectItem>
                 <SelectItem value="en">English</SelectItem>
               </SelectContent>
@@ -100,7 +120,7 @@ export function InquiryForm({ onResult, onLoading, isLoading }: Props) {
 
           <Button
             type="submit"
-            disabled={isLoading || !query.trim()}
+            disabled={isLoading || !query.trim() || isOverLimit}
             className="w-full"
           >
             {isLoading ? (

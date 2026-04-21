@@ -1,7 +1,9 @@
 'use client';
 
-import { useState } from 'react';
-import { Copy, Check, Edit2, Save, X, ExternalLink, Loader2 } from 'lucide-react';
+import { useState, useEffect } from 'react';
+import ReactMarkdown from 'react-markdown';
+import remarkGfm from 'remark-gfm';
+import { Copy, Check, Edit2, Save, X, ExternalLink, Loader2, RotateCcw } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/textarea';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -35,20 +37,41 @@ type Props = {
 export function ResponseDisplay({ result, isLoading }: Props) {
   const [isEditing, setIsEditing] = useState(false);
   const [editedResponse, setEditedResponse] = useState('');
+  // Track the latest confirmed/saved response separately from the AI draft
+  const [savedResponse, setSavedResponse] = useState<string | null>(null);
   const [isSaving, setIsSaving] = useState(false);
-  const [wasCorrected, setWasCorrected] = useState(false);
+  const [correctionCount, setCorrectionCount] = useState(0);
   const [copied, setCopied] = useState(false);
   const { toast } = useToast();
 
+  // The text currently shown (saved correction overrides original AI draft)
+  const displayResponse = savedResponse ?? result?.response ?? '';
+
+  // 新しい問い合わせ結果が到着したら編集状態をリセット（競合防止）
+  useEffect(() => {
+    setIsEditing(false);
+    setSavedResponse(null);
+    setCorrectionCount(0);
+  }, [result?.id]);
+
   async function handleCopy() {
-    const text = wasCorrected ? editedResponse : result?.response ?? '';
-    await navigator.clipboard.writeText(text);
-    setCopied(true);
-    setTimeout(() => setCopied(false), 2000);
+    try {
+      await navigator.clipboard.writeText(displayResponse);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    } catch {
+      // Clipboard API が使えない環境（非 HTTPS / 古いブラウザ）への対応
+      toast({
+        title: 'コピーに失敗しました',
+        description: 'テキストを手動で選択してコピーしてください。',
+        variant: 'destructive',
+      });
+    }
   }
 
   function handleEdit() {
-    setEditedResponse(result?.response ?? '');
+    // Start editing from the currently displayed text (not always the original)
+    setEditedResponse(displayResponse);
     setIsEditing(true);
   }
 
@@ -68,7 +91,8 @@ export function ResponseDisplay({ result, isLoading }: Props) {
 
       if (!res.ok) throw new Error('保存に失敗しました');
 
-      setWasCorrected(true);
+      setSavedResponse(editedResponse);
+      setCorrectionCount((c) => c + 1);
       setIsEditing(false);
       toast({
         title: '修正を保存しました',
@@ -83,6 +107,12 @@ export function ResponseDisplay({ result, isLoading }: Props) {
     } finally {
       setIsSaving(false);
     }
+  }
+
+  // Reset to original AI draft
+  function handleResetToOriginal() {
+    setSavedResponse(null);
+    setCorrectionCount(0);
   }
 
   if (isLoading) {
@@ -100,7 +130,7 @@ export function ResponseDisplay({ result, isLoading }: Props) {
           <Skeleton className="h-4 w-5/6" />
           <div className="flex items-center gap-2 mt-4">
             <Loader2 className="h-4 w-4 animate-spin text-blue-500" />
-            <span className="text-sm text-gray-500">Claude が回答を生成しています...</span>
+            <span className="text-sm text-gray-500">AI が回答を生成しています...</span>
           </div>
         </CardContent>
       </Card>
@@ -121,19 +151,32 @@ export function ResponseDisplay({ result, isLoading }: Props) {
     );
   }
 
-  const displayResponse = wasCorrected ? editedResponse : result.response;
+  const isCorrected = correctionCount > 0;
 
   return (
     <Card className="h-full">
       <CardHeader className="pb-2">
         <div className="flex items-center justify-between">
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-2 flex-wrap">
             <CardTitle className="text-lg">回答案</CardTitle>
-            {wasCorrected && (
-              <Badge className="bg-amber-100 text-amber-700 text-xs">修正済み</Badge>
+            {isCorrected && (
+              <Badge className="bg-amber-100 text-amber-700 text-xs">
+                修正済み {correctionCount > 1 ? `(${correctionCount}回)` : ''}
+              </Badge>
             )}
           </div>
           <div className="flex items-center gap-1">
+            {isCorrected && !isEditing && (
+              <Button
+                variant="ghost"
+                size="icon"
+                onClick={handleResetToOriginal}
+                title="元の AI 回答に戻す"
+                className="text-gray-400 hover:text-gray-600"
+              >
+                <RotateCcw className="h-4 w-4" />
+              </Button>
+            )}
             <Button variant="ghost" size="icon" onClick={handleCopy} title="コピー">
               {copied ? (
                 <Check className="h-4 w-4 text-green-500" />
@@ -141,7 +184,7 @@ export function ResponseDisplay({ result, isLoading }: Props) {
                 <Copy className="h-4 w-4" />
               )}
             </Button>
-            {!isEditing && !wasCorrected && (
+            {!isEditing && (
               <Button variant="ghost" size="icon" onClick={handleEdit} title="編集">
                 <Edit2 className="h-4 w-4" />
               </Button>
@@ -157,12 +200,13 @@ export function ResponseDisplay({ result, isLoading }: Props) {
               value={editedResponse}
               onChange={(e) => setEditedResponse(e.target.value)}
               className="min-h-[300px] text-sm font-mono resize-none"
+              placeholder="回答内容を編集してください..."
             />
             <div className="flex gap-2">
               <Button
                 size="sm"
                 onClick={handleSave}
-                disabled={isSaving}
+                disabled={isSaving || !editedResponse.trim()}
                 className="gap-2"
               >
                 {isSaving ? (
@@ -184,10 +228,47 @@ export function ResponseDisplay({ result, isLoading }: Props) {
             </div>
           </div>
         ) : (
-          <div className="prose prose-sm max-w-none">
-            <pre className="whitespace-pre-wrap font-sans text-sm text-gray-800 leading-relaxed">
+          <div className="prose prose-sm max-w-none text-gray-800">
+            <ReactMarkdown
+              remarkPlugins={[remarkGfm]}
+              components={{
+                // Override default elements for better styling in a card context
+                h1: ({ children }) => <h1 className="text-lg font-bold mt-3 mb-1">{children}</h1>,
+                h2: ({ children }) => <h2 className="text-base font-bold mt-3 mb-1">{children}</h2>,
+                h3: ({ children }) => <h3 className="text-sm font-semibold mt-2 mb-1">{children}</h3>,
+                p: ({ children }) => <p className="mb-2 leading-relaxed text-sm">{children}</p>,
+                ul: ({ children }) => <ul className="list-disc pl-5 mb-2 space-y-1 text-sm">{children}</ul>,
+                ol: ({ children }) => <ol className="list-decimal pl-5 mb-2 space-y-1 text-sm">{children}</ol>,
+                li: ({ children }) => <li className="text-sm">{children}</li>,
+                strong: ({ children }) => <strong className="font-semibold">{children}</strong>,
+                code: ({ children, className }) => {
+                  const isBlock = className?.includes('language-');
+                  return isBlock ? (
+                    <code className="block bg-gray-100 rounded p-2 text-xs font-mono overflow-x-auto whitespace-pre">
+                      {children}
+                    </code>
+                  ) : (
+                    <code className="bg-gray-100 rounded px-1 py-0.5 text-xs font-mono">{children}</code>
+                  );
+                },
+                pre: ({ children }) => (
+                  <pre className="bg-gray-100 rounded p-3 text-xs overflow-x-auto mb-2">{children}</pre>
+                ),
+                blockquote: ({ children }) => (
+                  <blockquote className="border-l-4 border-gray-300 pl-3 italic text-gray-600 my-2">
+                    {children}
+                  </blockquote>
+                ),
+                hr: () => <hr className="my-3 border-gray-200" />,
+                a: ({ href, children }) => (
+                  <a href={href} target="_blank" rel="noopener noreferrer" className="text-blue-500 hover:underline">
+                    {children}
+                  </a>
+                ),
+              }}
+            >
               {displayResponse}
-            </pre>
+            </ReactMarkdown>
           </div>
         )}
 
@@ -215,17 +296,23 @@ export function ResponseDisplay({ result, isLoading }: Props) {
                         <span className="font-medium truncate">{source.title}</span>
                       </div>
                       <div className="flex items-center gap-2 mt-0.5">
-                        {source.source_url && (
-                          <a
-                            href={source.source_url}
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            className="text-blue-500 hover:underline flex items-center gap-0.5 truncate max-w-[200px]"
-                          >
-                            {new URL(source.source_url).hostname}
-                            <ExternalLink className="h-2.5 w-2.5 shrink-0" />
-                          </a>
-                        )}
+                        {source.source_url && (() => {
+                          try {
+                            return (
+                              <a
+                                href={source.source_url}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                className="text-blue-500 hover:underline flex items-center gap-0.5 truncate max-w-[200px]"
+                              >
+                                {new URL(source.source_url).hostname}
+                                <ExternalLink className="h-2.5 w-2.5 shrink-0" />
+                              </a>
+                            );
+                          } catch {
+                            return <span className="text-gray-400 truncate max-w-[200px]">{source.source_url}</span>;
+                          }
+                        })()}
                         <span className="text-gray-400">
                           関連度 {Math.round(source.similarity * 100)}%
                         </span>

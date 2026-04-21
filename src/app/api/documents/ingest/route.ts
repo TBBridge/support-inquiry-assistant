@@ -89,30 +89,44 @@ async function handleWebIngest(
 
   if (type === 'gitbook') {
     const pages = await scrapeGitBook(url);
-    let totalChunks = 0;
 
-    for (const page of pages) {
-      const texts = page.chunks.map((c) => c.content);
-      const embeddings = await embedDocuments(texts);
-
-      await insertDocuments(
-        page.chunks.map((chunk, i) => ({
-          source_type: sourceType as 'gitbook' | 'web',
-          source_url: page.url,
-          title: page.chunks.length > 1
+    // ページ単位のループ呼び出し（N+1）を解消:
+    // 全ページのチャンクをまとめて収集 → 一括 embed → 一括 insert
+    type DocMeta = {
+      source_url: string;
+      title: string;
+      content: string;
+      metadata: Record<string, unknown>;
+    };
+    const allDocsMeta: DocMeta[] = pages.flatMap((page) =>
+      page.chunks.map((chunk, i) => ({
+        source_url: page.url,
+        title:
+          page.chunks.length > 1
             ? `${page.title} (${i + 1}/${page.chunks.length})`
             : page.title,
-          content: chunk.content,
-          embedding: embeddings[i],
-          metadata: { chunk_index: chunk.index, total_chunks: chunk.total },
-        }))
-      );
-      totalChunks += page.chunks.length;
-    }
+        content: chunk.content,
+        metadata: { chunk_index: chunk.index, total_chunks: chunk.total },
+      }))
+    );
+
+    const allTexts = allDocsMeta.map((d) => d.content);
+    const allEmbeddings = await embedDocuments(allTexts); // API 呼び出しを 1 回に削減
+
+    await insertDocuments(
+      allDocsMeta.map((d, i) => ({
+        source_type: sourceType as 'gitbook' | 'web',
+        source_url: d.source_url,
+        title: d.title,
+        content: d.content,
+        embedding: allEmbeddings[i],
+        metadata: d.metadata,
+      }))
+    );
 
     return NextResponse.json({
       success: true,
-      docCount: totalChunks,
+      docCount: allDocsMeta.length,
       pageCount: pages.length,
     });
   } else {

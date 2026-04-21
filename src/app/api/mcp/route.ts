@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { z } from 'zod';
 import { retrieveRelevantDocs } from '@/lib/rag/retrieval';
-import { generateResponse } from '@/lib/claude';
+import { generateResponse } from '@/lib/llm';
 import { listDocuments, countDocuments } from '@/lib/rag/vectorstore';
 import { sql } from '@/lib/db';
 
@@ -32,8 +32,8 @@ const TOOLS: MCPTool[] = [
         },
         language: {
           type: 'string',
-          enum: ['ja', 'en'],
-          description: '回答言語 (ja: 日本語, en: 英語)',
+          enum: ['ja', 'en', 'zh'],
+          description: '回答言語 (ja: 日本語, en: 英語, zh: 中文)',
         },
       },
       required: ['query'],
@@ -71,7 +71,14 @@ const TOOLS: MCPTool[] = [
 
 function verifyApiKey(request: NextRequest): boolean {
   const mcpApiKey = process.env.MCP_API_KEY;
-  if (!mcpApiKey) return true; // No key configured = open access (dev mode)
+  if (!mcpApiKey) {
+    // 本番環境ではキー未設定 = アクセス拒否。開発環境のみ許可。
+    if (process.env.NODE_ENV === 'production') {
+      console.warn('[MCP] MCP_API_KEY is not set. Denying access in production.');
+      return false;
+    }
+    return true; // 開発環境のみオープンアクセス
+  }
 
   const authHeader = request.headers.get('authorization');
   if (!authHeader) return false;
@@ -164,7 +171,7 @@ async function callTool(
     case 'generate_response': {
       const schema = z.object({
         query: z.string().min(1),
-        language: z.enum(['ja', 'en']).optional().default('ja'),
+        language: z.enum(['ja', 'en', 'zh']).optional().default('ja'),
       });
       const { query, language } = schema.parse(args);
 
@@ -179,6 +186,9 @@ async function callTool(
         RETURNING id
       `;
 
+      if (!result.rows[0]) {
+        throw new Error('Failed to create inquiry record: INSERT returned no rows');
+      }
       return {
         inquiry_id: result.rows[0].id,
         response,

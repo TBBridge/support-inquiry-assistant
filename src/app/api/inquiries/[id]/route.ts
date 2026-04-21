@@ -8,6 +8,12 @@ const CorrectionSchema = z.object({
   correctedResponse: z.string().min(1).max(10000),
 });
 
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+function isValidUuid(id: string): boolean {
+  return UUID_RE.test(id);
+}
+
 export async function PATCH(
   request: NextRequest,
   { params }: { params: { id: string } }
@@ -16,6 +22,10 @@ export async function PATCH(
     const body = await request.json();
     const { correctedResponse } = CorrectionSchema.parse(body);
     const inquiryId = params.id;
+
+    if (!isValidUuid(inquiryId)) {
+      return NextResponse.json({ error: 'Invalid inquiry ID format' }, { status: 400 });
+    }
 
     // Fetch original inquiry
     const inquiryResult = await sql`
@@ -75,6 +85,9 @@ export async function GET(
   _request: NextRequest,
   { params }: { params: { id: string } }
 ) {
+  if (!isValidUuid(params.id)) {
+    return NextResponse.json({ error: 'Invalid inquiry ID format' }, { status: 400 });
+  }
   try {
     const result = await sql`
       SELECT id, query, generated_response, final_response, was_corrected,
