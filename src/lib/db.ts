@@ -1,24 +1,34 @@
 import postgres from 'postgres';
 
-// Lazy initialization: ビルド時ではなくリクエスト時に接続を作成する
-let _pg: ReturnType<typeof postgres> | null = null;
+// Lazy initialization + dev hot-reload safe:
+// In development, Next.js re-evaluates modules on every HMR cycle, which
+// causes multiple connection pool instances. We store the singleton on
+// globalThis so it survives module re-evaluation.
+declare global {
+  // eslint-disable-next-line no-var
+  var __pgClient: ReturnType<typeof postgres> | undefined;
+}
 
 function getClient(): ReturnType<typeof postgres> {
-  if (_pg) return _pg;
+  if (globalThis.__pgClient) return globalThis.__pgClient;
 
   const connectionString = process.env.DATABASE_URL ?? process.env.POSTGRES_URL;
   if (!connectionString) {
     throw new Error('DATABASE_URL environment variable is required');
   }
 
-  _pg = postgres(connectionString, {
+  // pgBouncer (Transaction pooler, port 6543) では prepare: false が必要
+  const isPooler = connectionString.includes(':6543/');
+  const client = postgres(connectionString, {
     ssl: connectionString.includes('localhost') ? false : 'require',
-    max: 10,
+    max: isPooler ? 1 : 10,  // Transaction pooler は接続数を抑える
     idle_timeout: 20,
     connect_timeout: 10,
+    prepare: !isPooler,  // Transaction pooler では prepared statements 無効
   });
 
-  return _pg;
+  globalThis.__pgClient = client;
+  return client;
 }
 
 // @vercel/postgres 互換ラッパー: sql`...` テンプレートタグが同じように使えます
