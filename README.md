@@ -33,8 +33,8 @@
 
 | `LLM_PROVIDER` | 実体 | 推奨モデル | 費用 | 特徴 |
 |----------------|------|-----------|------|------|
-| `gemini`（デフォルト） | Google Gemini API | `gemini-2.0-flash` | **無料枠あり**<br>1日 1,500 req | APIキーのみで即使用可 |
-| `ollama` | ローカル Ollama | `qwen2.5:7b` | **完全無料** | 完全ローカル・プライベート |
+| `gemini`（デフォルト） | Google Gemini API | `gemini-2.5-flash` | **無料枠あり**<br>1日 1,500 req | APIキーのみで即使用可 |
+| `ollama` | ローカル Ollama | `qwen3:8b` | **完全無料** | 完全ローカル・プライベート |
 
 ### Embeddings（ベクトル変換）
 
@@ -94,9 +94,9 @@ psql "$DATABASE_URL" -f scripts/migrate-768.sql
 
 ```bash
 # LLM モデル（LLM_PROVIDER=ollama の場合）
-ollama pull qwen2.5:7b       # 日本語対応・高品質（推奨）
-# ollama pull llama3.2:3b   # 軽量・高速
-# ollama pull gemma3:4b     # Google 製・高精度
+ollama pull qwen3:8b         # 日本語対応・高品質（推奨）
+# ollama pull qwen3:4b      # 軽量・高速
+# ollama pull qwen3:14b     # 高精度・要スペック
 
 # Embedding モデル（EMBEDDING_PROVIDER=ollama の場合）
 ollama pull mxbai-embed-large  # 1024d（DB 移行不要・推奨）
@@ -127,7 +127,7 @@ GEMINI_MODEL=gemini-2.0-flash  # 省略可（デフォルト）
 
 # ─ Ollama（LLM_PROVIDER=ollama の場合）─
 OLLAMA_BASE_URL=http://localhost:11434  # 省略可（デフォルト）
-OLLAMA_MODEL=qwen2.5:7b                # 省略可（デフォルト）
+OLLAMA_MODEL=qwen3:8b                  # 省略可（デフォルト）
 ```
 
 ### Embedding 設定
@@ -187,7 +187,7 @@ EMBEDDING_DIM=1024
 ```env
 LLM_PROVIDER=gemini
 GEMINI_API_KEY=AIza...
-GEMINI_MODEL=gemini-2.0-flash
+GEMINI_MODEL=gemini-2.5-flash
 
 EMBEDDING_PROVIDER=gemini
 GEMINI_EMBED_MODEL=text-embedding-004

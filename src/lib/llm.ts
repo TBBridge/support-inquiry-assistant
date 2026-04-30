@@ -5,18 +5,18 @@
  * LLM_PROVIDER=ollama  → ローカル Ollama (完全無料)
  */
 
-import { GoogleGenerativeAI } from '@google/generative-ai';
+import { GoogleGenerativeAI } from "@google/generative-ai";
 
 // ─────────────────────────────────────────────
 // 型定義
 // ─────────────────────────────────────────────
 
-export type LLMProvider = 'gemini' | 'ollama';
+export type LLMProvider = "gemini" | "ollama";
 
 export type GenerateResponseInput = {
   query: string;
   context: string;
-  language?: 'ja' | 'en' | 'zh';
+  language?: "ja" | "en" | "zh";
 };
 
 export type GenerateResponseOutput = {
@@ -64,7 +64,11 @@ Guidelines:
 - 明确标注所参考的资料来源`,
 };
 
-function buildUserMessage(query: string, context: string, language: string): string {
+function buildUserMessage(
+  query: string,
+  context: string,
+  language: string,
+): string {
   const templates: Record<string, string> = {
     ja: `以下の参照情報を使用して、お客様の問い合わせに回答してください。
 
@@ -96,7 +100,7 @@ ${query}
 
 请根据以上参考资料，生成回答草稿。`,
   };
-  return templates[language] ?? templates['ja'];
+  return templates[language] ?? templates["ja"];
 }
 
 // ─────────────────────────────────────────────
@@ -104,10 +108,10 @@ ${query}
 // ─────────────────────────────────────────────
 
 function getProvider(): LLMProvider {
-  const p = (process.env.LLM_PROVIDER ?? 'gemini').toLowerCase();
-  if (p !== 'gemini' && p !== 'ollama') {
+  const p = (process.env.LLM_PROVIDER ?? "gemini").toLowerCase();
+  if (p !== "gemini" && p !== "ollama") {
     throw new Error(
-      `Invalid LLM_PROVIDER: "${p}". Must be "gemini" or "ollama".`
+      `Invalid LLM_PROVIDER: "${p}". Must be "gemini" or "ollama".`,
     );
   }
   return p;
@@ -128,7 +132,7 @@ function getGeminiClient(): GoogleGenerativeAI {
   const apiKey = process.env.GEMINI_API_KEY;
   if (!apiKey) {
     throw new Error(
-      'GEMINI_API_KEY environment variable is required when LLM_PROVIDER=gemini'
+      "GEMINI_API_KEY environment variable is required when LLM_PROVIDER=gemini",
     );
   }
   globalThis.__geminiClient = new GoogleGenerativeAI(apiKey);
@@ -136,11 +140,11 @@ function getGeminiClient(): GoogleGenerativeAI {
 }
 
 async function generateWithGemini(
-  input: GenerateResponseInput
+  input: GenerateResponseInput,
 ): Promise<GenerateResponseOutput> {
-  const { query, context, language = 'ja' } = input;
-  const modelName = process.env.GEMINI_MODEL ?? 'gemini-2.0-flash';
-  const systemPrompt = SYSTEM_PROMPTS[language] ?? SYSTEM_PROMPTS['ja'];
+  const { query, context, language = "ja" } = input;
+  const modelName = process.env.GEMINI_MODEL ?? "gemini-2.5-flash";
+  const systemPrompt = SYSTEM_PROMPTS[language] ?? SYSTEM_PROMPTS["ja"];
   const userMessage = buildUserMessage(query, context, language);
 
   const genModel = getGeminiClient().getGenerativeModel({
@@ -157,7 +161,7 @@ async function generateWithGemini(
       inputTokens: result.response.usageMetadata?.promptTokenCount ?? 0,
       outputTokens: result.response.usageMetadata?.candidatesTokenCount ?? 0,
     },
-    provider: 'gemini',
+    provider: "gemini",
     model: modelName,
   };
 }
@@ -174,22 +178,24 @@ type OllamaChatResponse = {
 };
 
 async function generateWithOllama(
-  input: GenerateResponseInput
+  input: GenerateResponseInput,
 ): Promise<GenerateResponseOutput> {
-  const { query, context, language = 'ja' } = input;
-  const baseUrl = (process.env.OLLAMA_BASE_URL ?? 'http://localhost:11434').replace(/\/$/, '');
-  const modelName = process.env.OLLAMA_MODEL ?? 'qwen2.5:7b';
-  const systemPrompt = SYSTEM_PROMPTS[language] ?? SYSTEM_PROMPTS['ja'];
+  const { query, context, language = "ja" } = input;
+  const baseUrl = (
+    process.env.OLLAMA_BASE_URL ?? "http://localhost:11434"
+  ).replace(/\/$/, "");
+  const modelName = process.env.OLLAMA_MODEL ?? "qwen3:8b";
+  const systemPrompt = SYSTEM_PROMPTS[language] ?? SYSTEM_PROMPTS["ja"];
   const userMessage = buildUserMessage(query, context, language);
 
   const res = await fetch(`${baseUrl}/api/chat`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
       model: modelName,
       messages: [
-        { role: 'system', content: systemPrompt },
-        { role: 'user', content: userMessage },
+        { role: "system", content: systemPrompt },
+        { role: "user", content: userMessage },
       ],
       stream: false,
       options: { temperature: 0.7, num_ctx: 8192 },
@@ -197,9 +203,9 @@ async function generateWithOllama(
   });
 
   if (!res.ok) {
-    const text = await res.text().catch(() => '');
+    const text = await res.text().catch(() => "");
     throw new Error(
-      `Ollama API error ${res.status}: ${text}. Is Ollama running at ${baseUrl}?`
+      `Ollama API error ${res.status}: ${text}. Is Ollama running at ${baseUrl}?`,
     );
   }
 
@@ -211,7 +217,7 @@ async function generateWithOllama(
       inputTokens: data.prompt_eval_count ?? 0,
       outputTokens: data.eval_count ?? 0,
     },
-    provider: 'ollama',
+    provider: "ollama",
     model: modelName,
   };
 }
@@ -221,13 +227,13 @@ async function generateWithOllama(
 // ─────────────────────────────────────────────
 
 export async function generateResponse(
-  input: GenerateResponseInput
+  input: GenerateResponseInput,
 ): Promise<GenerateResponseOutput> {
   const provider = getProvider();
   switch (provider) {
-    case 'gemini':
+    case "gemini":
       return generateWithGemini(input);
-    case 'ollama':
+    case "ollama":
       return generateWithOllama(input);
   }
 }
