@@ -2,7 +2,6 @@ import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { embedDocuments } from "@/lib/rag/embeddings";
 import { insertDocuments } from "@/lib/rag/vectorstore";
-import { parsePdf } from "@/lib/ingestion/pdf";
 import { scrapeUrl, scrapeGitBook } from "@/lib/ingestion/web";
 import { parseMarkdown } from "@/lib/ingestion/markdown";
 
@@ -63,6 +62,7 @@ async function handlePdfIngest(request: NextRequest): Promise<NextResponse> {
   }
 
   const buffer = Buffer.from(await file.arrayBuffer());
+  const { parsePdf } = await import("@/lib/ingestion/pdf");
   const { title, chunks } = await parsePdf(buffer, file.name);
 
   const texts = chunks.map((c) => c.content);

@@ -155,6 +155,7 @@ DATABASE_URL=postgresql://postgres.[ref]:[pass]@aws-0-[region].pooler.supabase.c
 
 # NextAuth.js
 NEXTAUTH_URL=http://localhost:3000
+AUTH_SECRET=<openssl rand -base64 32>
 NEXTAUTH_SECRET=<openssl rand -base64 32>
 
 # Google OAuth（https://console.cloud.google.com/）
