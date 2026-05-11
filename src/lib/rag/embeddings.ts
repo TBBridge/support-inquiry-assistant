@@ -7,20 +7,27 @@
  *   - OLLAMA_BASE_URL=http://localhost:11434
  *
  * EMBEDDING_PROVIDER=gemini
- *   - GEMINI_EMBED_MODEL=text-embedding-004 → 768 次元  (migration-768.sql が必要)
+ *   - GEMINI_EMBED_MODEL=gemini-embedding-001 → 768 次元  (migration-768.sql が必要)
  *   - GEMINI_API_KEY=...
  *
  * 次元数を変更する場合は scripts/migrate-768.sql を実行してから
  * 全ドキュメントを再インジェストしてください。
  */
 
-import { GoogleGenerativeAI, TaskType } from '@google/generative-ai';
-
 // ─────────────────────────────────────────────
 // 設定解決
 // ─────────────────────────────────────────────
 
 type EmbeddingProvider = 'ollama' | 'gemini';
+type GeminiTaskType = 'RETRIEVAL_QUERY' | 'RETRIEVAL_DOCUMENT';
+
+const DEFAULT_GEMINI_EMBED_MODEL = 'gemini-embedding-001';
+const LEGACY_GEMINI_EMBED_MODELS = new Set([
+  'embedding-001',
+  'text-embedding-004',
+  'text-embedding-005',
+  'text-multilingual-embedding-002',
+]);
 
 function getEmbeddingProvider(): EmbeddingProvider {
   const p = (process.env.EMBEDDING_PROVIDER ?? 'ollama').toLowerCase();
@@ -40,10 +47,21 @@ function getExpectedDim(): number {
     if (!isNaN(n) && n > 0) return n;
   }
   const provider = getEmbeddingProvider();
-  if (provider === 'gemini') return 768; // text-embedding-004 のデフォルト
+  if (provider === 'gemini') return 768; // DB の既定 migration に合わせる
   // Ollama
   const model = process.env.OLLAMA_EMBED_MODEL ?? 'mxbai-embed-large';
   return model === 'mxbai-embed-large' ? 1024 : 768;
+}
+
+function getGeminiEmbedModel(): string {
+  const configuredModel = process.env.GEMINI_EMBED_MODEL?.trim();
+  if (!configuredModel) return DEFAULT_GEMINI_EMBED_MODEL;
+
+  const model = configuredModel.replace(/^models\//, '');
+  if (LEGACY_GEMINI_EMBED_MODELS.has(model)) {
+    return DEFAULT_GEMINI_EMBED_MODEL;
+  }
+  return model;
 }
 
 // ─────────────────────────────────────────────
@@ -108,44 +126,90 @@ async function embedWithOllama(texts: string[]): Promise<number[][]> {
 // Gemini Embedding 実装
 // ─────────────────────────────────────────────
 
-// HMR 対応シングルトン
-declare global {
-  // eslint-disable-next-line no-var
-  var __geminiEmbedClient: GoogleGenerativeAI | undefined;
-}
+type GeminiBatchEmbedResponse = {
+  embeddings?: Array<{
+    values?: number[];
+  }>;
+};
 
-function getGeminiEmbedClient(): GoogleGenerativeAI {
-  if (globalThis.__geminiEmbedClient) return globalThis.__geminiEmbedClient;
+function getGeminiApiKey(): string {
   const apiKey = process.env.GEMINI_API_KEY;
   if (!apiKey) {
     throw new Error(
       'GEMINI_API_KEY environment variable is required when EMBEDDING_PROVIDER=gemini'
     );
   }
-  globalThis.__geminiEmbedClient = new GoogleGenerativeAI(apiKey);
-  return globalThis.__geminiEmbedClient;
+  return apiKey;
+}
+
+function shouldSendGeminiTaskType(model: string): boolean {
+  return model !== 'gemini-embedding-2';
+}
+
+async function postGeminiBatchEmbeddings(
+  texts: string[],
+  taskType: GeminiTaskType
+): Promise<number[][]> {
+  const model = getGeminiEmbedModel();
+  const dim = getExpectedDim();
+  const res = await fetch(
+    `https://generativelanguage.googleapis.com/v1beta/models/${model}:batchEmbedContents`,
+    {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'x-goog-api-key': getGeminiApiKey(),
+      },
+      body: JSON.stringify({
+        requests: texts.map((text) => ({
+          model: `models/${model}`,
+          content: { parts: [{ text }] },
+          outputDimensionality: dim,
+          ...(shouldSendGeminiTaskType(model) ? { taskType } : {}),
+        })),
+      }),
+    }
+  );
+
+  if (!res.ok) {
+    const text = await res.text().catch(() => '');
+    throw new Error(
+      `Gemini embed error ${res.status}: ${text.slice(0, 500)}. ` +
+      `Check GEMINI_EMBED_MODEL / GEMINI_API_KEY.`
+    );
+  }
+
+  const data = (await res.json()) as GeminiBatchEmbedResponse;
+  if (!data.embeddings || data.embeddings.length !== texts.length) {
+    throw new Error(
+      `Gemini returned ${data.embeddings?.length ?? 0} embeddings for ${texts.length} inputs`
+    );
+  }
+
+  return data.embeddings.map((embedding, index) => {
+    if (!embedding.values) {
+      throw new Error(`Gemini returned an empty embedding at index ${index}`);
+    }
+    return embedding.values;
+  });
 }
 
 /**
  * Gemini で埋め込みを生成します。
  *
- * text-embedding-004 は embedContent には対応していますが、
- * batchEmbedContents では 404 になるため 1 件ずつ処理します。
+ * text-embedding-004 などの旧モデル名は Gemini API v1beta で 404 になるため、
+ * 現行の gemini-embedding-001 に正規化し、DB 既定の 768 次元で取得します。
  */
 async function embedWithGemini(
   texts: string[],
-  taskType: TaskType
+  taskType: GeminiTaskType
 ): Promise<number[][]> {
-  const modelName = process.env.GEMINI_EMBED_MODEL ?? 'text-embedding-004';
-  const genModel = getGeminiEmbedClient().getGenerativeModel({ model: modelName });
-
+  const BATCH = 100;
   const embeddings: number[][] = [];
-  for (const text of texts) {
-    const result = await genModel.embedContent({
-      content: { role: 'user', parts: [{ text }] },
-      taskType,
-    });
-    embeddings.push(result.embedding.values);
+  for (let i = 0; i < texts.length; i += BATCH) {
+    const batch = texts.slice(i, i + BATCH);
+    const batchEmbeds = await postGeminiBatchEmbeddings(batch, taskType);
+    embeddings.push(...batchEmbeds);
   }
 
   return embeddings;
@@ -166,7 +230,7 @@ export async function embedText(text: string): Promise<number[]> {
   if (provider === 'ollama') {
     embeddings = await embedWithOllama([text]);
   } else {
-    embeddings = await embedWithGemini([text], TaskType.RETRIEVAL_QUERY);
+    embeddings = await embedWithGemini([text], 'RETRIEVAL_QUERY');
   }
 
   return validateEmbedding(embeddings[0], dim, 'embedText');
@@ -176,7 +240,7 @@ export async function embedText(text: string): Promise<number[]> {
  * 複数のドキュメントテキストを一括で埋め込みベクトルに変換します。
  *
  * - Ollama:  バッチサイズ 64 件ずつ処理
- * - Gemini:  1 件ずつ処理（text-embedding-004 の batchEmbedContents 非対応を回避）
+ * - Gemini:  バッチサイズ 100 件ずつ処理
  */
 export async function embedDocuments(texts: string[]): Promise<number[][]> {
   if (texts.length === 0) return [];
@@ -193,7 +257,7 @@ export async function embedDocuments(texts: string[]): Promise<number[][]> {
       allEmbeddings.push(...batchEmbeds);
     }
   } else {
-    const geminiEmbeds = await embedWithGemini(texts, TaskType.RETRIEVAL_DOCUMENT);
+    const geminiEmbeds = await embedWithGemini(texts, 'RETRIEVAL_DOCUMENT');
     allEmbeddings.push(...geminiEmbeds);
   }
 
