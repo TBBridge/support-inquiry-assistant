@@ -127,8 +127,10 @@ function getGeminiEmbedClient(): GoogleGenerativeAI {
 }
 
 /**
- * Gemini text-embedding-004 でバッチ埋め込みを生成します。
- * バッチサイズ上限は 100 件です。
+ * Gemini で埋め込みを生成します。
+ *
+ * text-embedding-004 は embedContent には対応していますが、
+ * batchEmbedContents では 404 になるため 1 件ずつ処理します。
  */
 async function embedWithGemini(
   texts: string[],
@@ -137,20 +139,16 @@ async function embedWithGemini(
   const modelName = process.env.GEMINI_EMBED_MODEL ?? 'text-embedding-004';
   const genModel = getGeminiEmbedClient().getGenerativeModel({ model: modelName });
 
-  const result = await genModel.batchEmbedContents({
-    requests: texts.map((text) => ({
+  const embeddings: number[][] = [];
+  for (const text of texts) {
+    const result = await genModel.embedContent({
       content: { role: 'user', parts: [{ text }] },
       taskType,
-    })),
-  });
-
-  if (!result.embeddings || result.embeddings.length !== texts.length) {
-    throw new Error(
-      `Gemini returned ${result.embeddings?.length ?? 0} embeddings for ${texts.length} inputs`
-    );
+    });
+    embeddings.push(result.embedding.values);
   }
 
-  return result.embeddings.map((e) => e.values);
+  return embeddings;
 }
 
 // ─────────────────────────────────────────────
@@ -178,7 +176,7 @@ export async function embedText(text: string): Promise<number[]> {
  * 複数のドキュメントテキストを一括で埋め込みベクトルに変換します。
  *
  * - Ollama:  バッチサイズ 64 件ずつ処理
- * - Gemini:  バッチサイズ 100 件ずつ処理（API 上限）
+ * - Gemini:  1 件ずつ処理（text-embedding-004 の batchEmbedContents 非対応を回避）
  */
 export async function embedDocuments(texts: string[]): Promise<number[][]> {
   if (texts.length === 0) return [];
@@ -195,13 +193,8 @@ export async function embedDocuments(texts: string[]): Promise<number[][]> {
       allEmbeddings.push(...batchEmbeds);
     }
   } else {
-    // Gemini: 100 件ずつバッチ
-    const BATCH = 100;
-    for (let i = 0; i < texts.length; i += BATCH) {
-      const batch = texts.slice(i, i + BATCH);
-      const batchEmbeds = await embedWithGemini(batch, TaskType.RETRIEVAL_DOCUMENT);
-      allEmbeddings.push(...batchEmbeds);
-    }
+    const geminiEmbeds = await embedWithGemini(texts, TaskType.RETRIEVAL_DOCUMENT);
+    allEmbeddings.push(...geminiEmbeds);
   }
 
   // 全件の次元数を検証
