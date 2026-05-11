@@ -42,7 +42,7 @@
 |----------------------|--------|------|---------|------|
 | `ollama`（デフォルト・推奨）| `mxbai-embed-large` | **1024d** | **不要** | 完全無料 |
 | `ollama` | `nomic-embed-text` | 768d | 必要 | 完全無料 |
-| `gemini` | `gemini-embedding-001` | 768d | 必要 | 無料枠あり |
+| `gemini` | `gemini-embedding-001` | **1024d** | **不要** | 無料枠あり |
 
 > **推奨構成**: `EMBEDDING_PROVIDER=ollama` + `OLLAMA_EMBED_MODEL=mxbai-embed-large` は DB 移行が不要でそのまま使えます。
 
@@ -141,7 +141,7 @@ OLLAMA_EMBED_MODEL=mxbai-embed-large   # 1024d（省略可・デフォルト）
 # OLLAMA_EMBED_MODEL=nomic-embed-text  # 768d（migrate-768.sql が必要）
 
 # ─ Gemini Embedding（GEMINI_API_KEY は上記と共通）─
-GEMINI_EMBED_MODEL=gemini-embedding-001  # 768d（migrate-768.sql が必要）
+GEMINI_EMBED_MODEL=gemini-embedding-001  # 1024d（DB 移行不要）
 
 # DB の vector 列次元数と一致させること（デフォルト: 1024）
 EMBEDDING_DIM=1024
@@ -192,8 +192,8 @@ GEMINI_MODEL=gemini-2.5-flash
 
 EMBEDDING_PROVIDER=gemini
 GEMINI_EMBED_MODEL=gemini-embedding-001
-EMBEDDING_DIM=768
-# → migrate-768.sql の実行が必要
+EMBEDDING_DIM=1024
+# → DB 移行不要
 ```
 </details>
 

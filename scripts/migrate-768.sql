@@ -1,8 +1,8 @@
 -- ============================================================
 -- Migration: 埋め込みベクトルの次元数を 1024 → 768 に変更
 -- ============================================================
--- 対象: Gemini text-embedding-004 または nomic-embed-text を使用する場合
--- 条件: EMBEDDING_PROVIDER=gemini または OLLAMA_EMBED_MODEL=nomic-embed-text
+-- 対象: 768 次元の Embedding を使用する場合
+-- 条件: EMBEDDING_DIM=768 または OLLAMA_EMBED_MODEL=nomic-embed-text
 --
 -- ⚠️  実行前の確認事項:
 --   1. すべての documents を削除するか、再インジェストの準備ができていること

@@ -7,7 +7,7 @@
  *   - OLLAMA_BASE_URL=http://localhost:11434
  *
  * EMBEDDING_PROVIDER=gemini
- *   - GEMINI_EMBED_MODEL=gemini-embedding-001 → 768 次元  (migration-768.sql が必要)
+ *   - GEMINI_EMBED_MODEL=gemini-embedding-001 → 1024 次元 (DB migration 不要)
  *   - GEMINI_API_KEY=...
  *
  * 次元数を変更する場合は scripts/migrate-768.sql を実行してから
@@ -47,7 +47,7 @@ function getExpectedDim(): number {
     if (!isNaN(n) && n > 0) return n;
   }
   const provider = getEmbeddingProvider();
-  if (provider === 'gemini') return 768; // DB の既定 migration に合わせる
+  if (provider === 'gemini') return 1024; // 初期 DB スキーマ vector(1024) に合わせる
   // Ollama
   const model = process.env.OLLAMA_EMBED_MODEL ?? 'mxbai-embed-large';
   return model === 'mxbai-embed-large' ? 1024 : 768;
@@ -198,7 +198,7 @@ async function postGeminiBatchEmbeddings(
  * Gemini で埋め込みを生成します。
  *
  * text-embedding-004 などの旧モデル名は Gemini API v1beta で 404 になるため、
- * 現行の gemini-embedding-001 に正規化し、DB 既定の 768 次元で取得します。
+ * 現行の gemini-embedding-001 に正規化し、DB 既定の 1024 次元で取得します。
  */
 async function embedWithGemini(
   texts: string[],
