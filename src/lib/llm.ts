@@ -1,8 +1,9 @@
 /**
- * LLM 抽象層 — Gemini または Ollama を環境変数で切り替え
+ * LLM 抽象層 — Gemini / Ollama / Hugging Face を環境変数で切り替え
  *
- * LLM_PROVIDER=gemini  → Google Gemini API (無料枠あり)
- * LLM_PROVIDER=ollama  → ローカル Ollama (完全無料)
+ * LLM_PROVIDER=gemini       → Google Gemini API (無料枠あり)
+ * LLM_PROVIDER=ollama       → ローカル Ollama (完全無料)
+ * LLM_PROVIDER=huggingface  → Hugging Face Inference Providers API
  */
 
 import { GoogleGenerativeAI } from "@google/generative-ai";
@@ -11,7 +12,7 @@ import { GoogleGenerativeAI } from "@google/generative-ai";
 // 型定義
 // ─────────────────────────────────────────────
 
-export type LLMProvider = "gemini" | "ollama";
+export type LLMProvider = "gemini" | "ollama" | "huggingface";
 
 export type GenerateResponseInput = {
   query: string;
@@ -109,9 +110,9 @@ ${query}
 
 function getProvider(): LLMProvider {
   const p = (process.env.LLM_PROVIDER ?? "gemini").toLowerCase();
-  if (p !== "gemini" && p !== "ollama") {
+  if (p !== "gemini" && p !== "ollama" && p !== "huggingface") {
     throw new Error(
-      `Invalid LLM_PROVIDER: "${p}". Must be "gemini" or "ollama".`,
+      `Invalid LLM_PROVIDER: "${p}". Must be "gemini", "ollama", or "huggingface".`,
     );
   }
   return p;
@@ -223,6 +224,95 @@ async function generateWithOllama(
 }
 
 // ─────────────────────────────────────────────
+// Hugging Face 実装
+// ─────────────────────────────────────────────
+
+type HuggingFaceChatResponse = {
+  choices?: Array<{
+    message?: {
+      content?: string;
+    };
+  }>;
+  usage?: {
+    prompt_tokens?: number;
+    completion_tokens?: number;
+  };
+};
+
+function getHuggingFaceApiKey(): string {
+  const apiKey = process.env.HUGGINGFACE_API_KEY ?? process.env.HF_TOKEN;
+  if (!apiKey) {
+    throw new Error(
+      "HUGGINGFACE_API_KEY or HF_TOKEN environment variable is required when LLM_PROVIDER=huggingface",
+    );
+  }
+  return apiKey;
+}
+
+function getOptionalNumberEnv(name: string, fallback: number): number {
+  const value = process.env[name];
+  if (!value) return fallback;
+
+  const parsed = Number(value);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
+}
+
+async function generateWithHuggingFace(
+  input: GenerateResponseInput,
+): Promise<GenerateResponseOutput> {
+  const { query, context, language = "ja" } = input;
+  const baseUrl = (
+    process.env.HUGGINGFACE_BASE_URL ?? "https://router.huggingface.co/v1"
+  ).replace(/\/$/, "");
+  const modelName =
+    process.env.HUGGINGFACE_MODEL ?? "google/gemma-4-26B-A4B-it:fastest";
+  const systemPrompt = SYSTEM_PROMPTS[language] ?? SYSTEM_PROMPTS["ja"];
+  const userMessage = buildUserMessage(query, context, language);
+
+  const res = await fetch(`${baseUrl}/chat/completions`, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${getHuggingFaceApiKey()}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      model: modelName,
+      messages: [
+        { role: "system", content: systemPrompt },
+        { role: "user", content: userMessage },
+      ],
+      max_tokens: getOptionalNumberEnv("HUGGINGFACE_MAX_TOKENS", 1024),
+      temperature: getOptionalNumberEnv("HUGGINGFACE_TEMPERATURE", 0.7),
+      stream: false,
+    }),
+  });
+
+  if (!res.ok) {
+    const text = await res.text().catch(() => "");
+    throw new Error(
+      `Hugging Face API error ${res.status}: ${text.slice(0, 500)}. ` +
+        "Check HUGGINGFACE_API_KEY / HF_TOKEN and model access.",
+    );
+  }
+
+  const data = (await res.json()) as HuggingFaceChatResponse;
+  const response = data.choices?.[0]?.message?.content;
+  if (!response) {
+    throw new Error("Hugging Face API returned an empty response");
+  }
+
+  return {
+    response,
+    usage: {
+      inputTokens: data.usage?.prompt_tokens ?? 0,
+      outputTokens: data.usage?.completion_tokens ?? 0,
+    },
+    provider: "huggingface",
+    model: modelName,
+  };
+}
+
+// ─────────────────────────────────────────────
 // 公開 API
 // ─────────────────────────────────────────────
 
@@ -235,5 +325,7 @@ export async function generateResponse(
       return generateWithGemini(input);
     case "ollama":
       return generateWithOllama(input);
+    case "huggingface":
+      return generateWithHuggingFace(input);
   }
 }

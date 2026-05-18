@@ -35,6 +35,7 @@
 |----------------|------|-----------|------|------|
 | `gemini`（デフォルト） | Google Gemini API | `gemini-2.5-flash` | **無料枠あり**<br>1日 1,500 req | APIキーのみで即使用可 |
 | `ollama` | ローカル Ollama | `qwen3:8b` | **完全無料** | 完全ローカル・プライベート |
+| `huggingface` | Hugging Face Inference Providers | `google/gemma-4-26B-A4B-it:fastest` | HF 課金/無料枠に依存 | Gemma 4 を API 経由で利用 |
 
 ### Embeddings（ベクトル変換）
 
@@ -118,7 +119,7 @@ npm run dev
 
 ```env
 # LLM プロバイダ選択（必須）
-LLM_PROVIDER=gemini          # gemini | ollama
+LLM_PROVIDER=gemini          # gemini | ollama | huggingface
 
 # ─ Gemini（LLM_PROVIDER=gemini の場合）─
 # 取得先: https://aistudio.google.com/apikey（無料）
@@ -128,6 +129,15 @@ GEMINI_MODEL=gemini-2.0-flash  # 省略可（デフォルト）
 # ─ Ollama（LLM_PROVIDER=ollama の場合）─
 OLLAMA_BASE_URL=http://localhost:11434  # 省略可（デフォルト）
 OLLAMA_MODEL=qwen3:8b                  # 省略可（デフォルト）
+
+# ─ Hugging Face（LLM_PROVIDER=huggingface の場合）─
+# fine-grained token の "Make calls to Inference Providers" 権限が必要
+# HUGGINGFACE_API_KEY の代わりに HF_TOKEN も利用可
+HUGGINGFACE_API_KEY=hf_...
+HUGGINGFACE_MODEL=google/gemma-4-26B-A4B-it:fastest
+HUGGINGFACE_BASE_URL=https://router.huggingface.co/v1
+HUGGINGFACE_MAX_TOKENS=1024
+HUGGINGFACE_TEMPERATURE=0.7
 ```
 
 ### Embedding 設定
@@ -198,7 +208,23 @@ EMBEDDING_DIM=1024
 </details>
 
 <details>
-<summary>③ 混合（LLM: Gemini + Embedding: Ollama）</summary>
+<summary>③ Hugging Face Gemma 4（LLM: Hugging Face + Embedding: Gemini）</summary>
+
+```env
+LLM_PROVIDER=huggingface
+HUGGINGFACE_API_KEY=hf_...
+HUGGINGFACE_MODEL=google/gemma-4-26B-A4B-it:fastest
+
+EMBEDDING_PROVIDER=gemini
+GEMINI_API_KEY=AIza...
+GEMINI_EMBED_MODEL=gemini-embedding-001
+EMBEDDING_DIM=1024
+# → DB 移行不要
+```
+</details>
+
+<details>
+<summary>④ 混合（LLM: Gemini + Embedding: Ollama）</summary>
 
 ```env
 # Gemini で高品質な回答、Embedding は完全ローカル
@@ -311,7 +337,7 @@ src/
 │   │   └── mcp/              # MCP over HTTP エンドポイント
 │   └── (admin)/              # 管理画面（Google OAuth 保護）
 ├── lib/
-│   ├── llm.ts                # LLM 抽象層（Gemini / Ollama 切り替え）
+│   ├── llm.ts                # LLM 抽象層（Gemini / Ollama / Hugging Face 切り替え）
 │   ├── claude.ts             # llm.ts への後方互換シム
 │   ├── db.ts                 # postgres.js ラッパー
 │   └── rag/
